@@ -14,6 +14,12 @@ from datetime import datetime
 from dateutil.parser import parse
 from typing import List, Tuple, Optional
 from difflib import SequenceMatcher
+import logging
+from werkzeug.exceptions import HTTPException
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -22,19 +28,34 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+# Error handler for all exceptions
+@app.errorhandler(Exception)
+def handle_error(e):
+    logger.error(f"Unhandled exception: {str(e)}")
+    logger.error(traceback.format_exc())
+    
+    if isinstance(e, HTTPException):
+        return jsonify({'error': e.description}), e.code
+    return jsonify({'error': 'An unexpected error occurred'}), 500
+
 # Initialize the sentence transformer model
-print("Initializing sentence transformer model...")
-model = SentenceTransformer('all-MiniLM-L6-v2')
-print("Model initialized successfully")
+logger.info("Initializing sentence transformer model...")
+try:
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    logger.info("Model initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize model: {str(e)}")
+    logger.error(traceback.format_exc())
+    raise
 
 # Load skills from JSON file with error handling
 try:
     with open("skills.json", "r") as f:
         SKILL_LIST = json.load(f)
-    print("Skills loaded successfully from skills.json")
+    logger.info("Skills loaded successfully from skills.json")
 except (FileNotFoundError, json.JSONDecodeError) as e:
-    print(f"Warning: Could not load skills.json: {str(e)}")
-    print("Falling back to empty skill list")
+    logger.warning(f"Could not load skills.json: {str(e)}")
+    logger.warning("Falling back to empty skill list")
     SKILL_LIST = {}
 
 # Global degree mappings
@@ -914,33 +935,38 @@ def testimonials():
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
-        print("\n=== Starting Resume Analysis ===")
+        logger.info("\n=== Starting Resume Analysis ===")
         
         if 'resumes[]' not in request.files:
-            print("Error: No resume files provided")
+            logger.error("No resume files provided")
             return jsonify({'error': 'No resume files provided'}), 400
         
         job_description = request.form.get('jobDescription', '').strip()
         if not job_description:
-            print("Error: No job description provided")
+            logger.error("No job description provided")
             return jsonify({'error': 'No job description provided'}), 400
         
-        print(f"Job description length: {len(job_description)} characters")
-        print(f"Number of files received: {len(request.files.getlist('resumes[]'))}")
+        logger.info(f"Job description length: {len(job_description)} characters")
+        logger.info(f"Number of files received: {len(request.files.getlist('resumes[]'))}")
 
         # Extract job title and context
-        job_title = extract_job_title(job_description)
-        job_context = get_job_context_category(job_description)
-        print(f"Extracted job title: {job_title}")
-        print(f"Extracted job context: {job_context}")
+        try:
+            job_title = extract_job_title(job_description)
+            job_context = get_job_context_category(job_description)
+            logger.info(f"Extracted job title: {job_title}")
+            logger.info(f"Extracted job context: {job_context}")
 
-        # Extract keywords from job description
-        keywords = extract_keywords(job_description)
-        print(f"Extracted keywords: {keywords}")
+            # Extract keywords from job description
+            keywords = extract_keywords(job_description)
+            logger.info(f"Extracted keywords: {keywords}")
 
-        # Extract and normalize skills from job description
-        job_skills = extract_skills(job_description)
-        print(f"Extracted skills from job description: {job_skills}")
+            # Extract and normalize skills from job description
+            job_skills = extract_skills(job_description)
+            logger.info(f"Extracted skills from job description: {job_skills}")
+        except Exception as e:
+            logger.error(f"Error processing job description: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({'error': 'Error processing job description'}), 400
 
         results = []
         files = request.files.getlist('resumes[]')
@@ -949,12 +975,12 @@ def analyze():
             if file.filename == '':
                 continue
                 
-            print(f"\nProcessing file: {file.filename}")
+            logger.info(f"\nProcessing file: {file.filename}")
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
             
             try:
                 # Save the file
-                print(f"Saving file to: {file_path}")
+                logger.info(f"Saving file to: {file_path}")
                 file.save(file_path)
                 
                 # Extract text based on file extension
@@ -963,10 +989,10 @@ def analyze():
                 elif file.filename.lower().endswith('.docx'):
                     text = extract_text_from_docx(file_path)
                 else:
-                    print(f"Skipping unsupported file type: {file.filename}")
+                    logger.warning(f"Skipping unsupported file type: {file.filename}")
                     continue
                 
-                print(f"Text extracted, length: {len(text)} characters")
+                logger.info(f"Text extracted, length: {len(text)} characters")
                 
                 # Extract latest job title and education
                 latest_title = extract_latest_title(text)
@@ -977,20 +1003,20 @@ def analyze():
                 
                 # Extract and normalize skills from resume
                 resume_skills = extract_skills(text)
-                print(f"Extracted skills from resume: {resume_skills}")
+                logger.info(f"Extracted skills from resume: {resume_skills}")
                 
                 # Extract relevant experience based on keywords
                 experience, matched_keywords, earliest_start, latest_end = extract_relevant_experience_years(text, keywords)
                 relevant_experience, best_match_title = extract_relevant_experience(text, job_context)
-                print(f"Extracted total experience: {experience} years")
-                print(f"Extracted relevant experience: {relevant_experience} years")
-                print(f"Best matching title: {best_match_title}")
-                print(f"Matched keywords: {matched_keywords}")
-                print(f"Experience range: {earliest_start} to {latest_end}")
+                logger.info(f"Extracted total experience: {experience} years")
+                logger.info(f"Extracted relevant experience: {relevant_experience} years")
+                logger.info(f"Best matching title: {best_match_title}")
+                logger.info(f"Matched keywords: {matched_keywords}")
+                logger.info(f"Experience range: {earliest_start} to {latest_end}")
                 
                 # Find matched skills using set intersection
                 matched_skills = list(set(resume_skills) & set(job_skills))
-                print(f"Matched skills: {matched_skills}")
+                logger.info(f"Matched skills: {matched_skills}")
                 
                 # Build reason summary
                 reason_parts = []
@@ -1040,41 +1066,47 @@ def analyze():
                 })
                 
                 # Clean up the uploaded file
-                print(f"Cleaning up file: {file_path}")
-                os.remove(file_path)
+                logger.info(f"Cleaning up file: {file_path}")
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logger.warning(f"Failed to remove file {file_path}: {str(e)}")
                 
             except Exception as e:
-                print(f"Error processing {file.filename}:")
-                print(f"Error type: {type(e).__name__}")
-                print(f"Error message: {str(e)}")
-                print("Stack trace:")
-                print(traceback.format_exc())
+                logger.error(f"Error processing {file.filename}:")
+                logger.error(f"Error type: {type(e).__name__}")
+                logger.error(f"Error message: {str(e)}")
+                logger.error("Stack trace:")
+                logger.error(traceback.format_exc())
                 continue
         
         if not results:
-            print("No valid results generated")
+            logger.error("No valid results generated")
             return jsonify({'error': 'No valid results could be generated from the provided files'}), 400
         
         # Sort results by score in descending order
         results.sort(key=lambda x: x['score'], reverse=True)
         
         # Save results to CSV with rounded values
-        print("\nSaving results to CSV")
-        df = pd.DataFrame(results)
-        # Ensure all numeric values in the DataFrame are rounded
-        df['score'] = df['score'].round(2)
-        df.to_csv('results.csv', index=False)
+        logger.info("\nSaving results to CSV")
+        try:
+            df = pd.DataFrame(results)
+            # Ensure all numeric values in the DataFrame are rounded
+            df['score'] = df['score'].round(2)
+            df.to_csv('results.csv', index=False)
+        except Exception as e:
+            logger.warning(f"Failed to save results to CSV: {str(e)}")
         
-        print("=== Analysis Complete ===")
+        logger.info("=== Analysis Complete ===")
         return jsonify(results)
         
     except Exception as e:
-        print("\n=== Critical Error ===")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        print("Stack trace:")
-        print(traceback.format_exc())
-        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+        logger.error("\n=== Critical Error ===")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error("Stack trace:")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': 'An unexpected error occurred during analysis'}), 500
 
 @app.route('/download')
 def download():

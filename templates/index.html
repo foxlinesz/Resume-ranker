@@ -152,13 +152,20 @@
                     body: formData
                 });
 
-                const data = await response.json();
+                let data;
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    // If response is not JSON, it's likely an HTML error page
+                    console.error('Invalid JSON response:', e);
+                    throw new Error('Server returned an invalid response. Please try again later.');
+                }
                 
                 if (response.ok) {
                     displayResults(data);
                 } else {
                     console.error('Server error:', data.error);
-                    alert(`Error: ${data.error}`);
+                    alert(`Error: ${data.error || 'An unknown error occurred'}`);
                 }
             } catch (error) {
                 console.error('Upload failed:', error);
