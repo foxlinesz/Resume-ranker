@@ -155,10 +155,10 @@
                 let data;
                 try {
                     data = await response.json();
-                } catch (e) {
-                    // If response is not JSON, it's likely an HTML error page
-                    console.error('Invalid JSON response:', e);
-                    throw new Error('Server returned an invalid response. Please try again later.');
+                } catch (err) {
+                    const text = await response.text();
+                    alert("Server Error:\n" + text);
+                    throw new Error("Invalid JSON: " + text);
                 }
                 
                 if (response.ok) {
